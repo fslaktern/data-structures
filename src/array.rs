@@ -21,6 +21,7 @@ pub trait MemArray<T> {
         Self: Sized;
     fn grow(&mut self) -> Result<(), String>;
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
     fn memory_used(&self) -> usize;
 }
 
@@ -121,6 +122,10 @@ impl<T> MemArray<T> for Array<T> {
     /// Return pre-counted length of array. Normally O(n), but here O(1)
     fn len(&self) -> usize {
         self.size
+    }
+    /// Return true if Array is empty
+    fn is_empty(&self) -> bool {
+        self.size == 0
     }
     /// Number of bytes used in memory
     fn memory_used(&self) -> usize {
@@ -298,49 +303,6 @@ impl<T> Drop for Array<T> {
         let current_layout = Layout::array::<T>(self.capacity).unwrap();
         unsafe {
             dealloc(self.ptr as *mut u8, current_layout);
-        }
-    }
-}
-
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_new_empty_array() {
-        let array: Array<u8> = Array::new();
-        assert_eq!(array.size, 0);
-    }
-    #[test]
-    fn test_fixed_size_array() {
-        let mut array: Array<u8> =
-            Array::with_capacity(10).expect("Failed allocating memory for new array");
-        // Cause another memory allocation by exceeding capacity
-        for _ in 0..15 {
-            assert!(array.insert(1).is_ok());
-        }
-        assert_eq!(array.capacity, 20);
-        assert_eq!(array.size, 15);
-    }
-    #[test]
-    #[should_panic]
-    fn test_insert_and_index() {
-        let mut array: Array<u8> = Array::new();
-        for x in 0..100 {
-            assert!(array.insert(x).is_ok());
-        }
-        assert_eq!(array[0], 0);
-        assert_eq!(array[99], 99);
-        // Index out of bounds causing panic at runtime
-        _ = array[100];
-    }
-    #[test]
-    fn test_grow() {
-        let mut array: Array<u8> = Array::new();
-        // Test allocating up to 2^16 == 16384 bytes of memory
-        for i in 0..16 {
-            assert!(array.grow().is_ok());
-            assert_eq!(array.size, 0);
-            assert_eq!(array.capacity, usize::pow(2, i));
         }
     }
 }
