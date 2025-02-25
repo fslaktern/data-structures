@@ -171,23 +171,23 @@ impl<T> RemoveArray<T> for Array<T> {
     /// Remove element at given index and return it. O(1)..O(n)
     fn remove(&mut self, index: usize) -> Result<T, String> {
         if self.size < index {
-            return Err("Index out of bounds".into());
+            Err("Index out of bounds".into())
         } else if self.size == index - 1 {
             // Special case: If removing the last element, use pop() for O(1) complexity
-            return Ok(self.pop().unwrap());
-        }
-        unsafe {
-            let removed = ptr::read(self.ptr.add(index));
-
-            // Shift elements left: from index + 1 to the end
-            ptr::copy(
-                // Source: Everything after index
-                self.ptr.add(index + 1),
-                // Destination: To the specified index
-                self.ptr.add(index),
-                // Elements from source to shift: Everything after the element at index
-                self.size - index - 1,
-            );
+            Ok(self.pop().unwrap())
+        } else {        
+            let removed = unsafe { ptr::read(self.ptr.add(index)) };
+            unsafe {
+                // Shift elements left: from index + 1 to the end
+                ptr::copy(
+                    // Source: Everything after index
+                    self.ptr.add(index + 1),
+                    // Destination: To the specified index
+                    self.ptr.add(index),
+                    // Elements from source to shift: Everything after the element at index
+                    self.size - index - 1,
+                );
+            }
             self.size -= 1;
             Ok(removed)
         }
