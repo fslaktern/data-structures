@@ -1,27 +1,24 @@
+use std::fmt::{self, Debug, Display};
+use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Index, IndexMut};
 use std::ptr;
-use std::{
-    fmt,
-    fmt::{Debug, Display},
-};
 
-enum LinkedListType {
-    SinglyLinkedList,
-    DoublyLinkedList,
-}
-
+#[repr(C)]
 pub struct DoublyLinkedList<T> {
     head: *mut DoublyLinkedListNode<T>,
     tail: *mut DoublyLinkedListNode<T>,
 }
 
 pub struct DoublyLinkedListNode<T> {
-    // First node does not have a previous node
-    previous: *mut DoublyLinkedListNode<T>,
+    pub previous: *mut DoublyLinkedListNode<T>,
     data: T,
-    // Last node does not have a last node
-    next: *mut DoublyLinkedListNode<T>,
+    pub next: *mut DoublyLinkedListNode<T>,
+}
+
+pub struct DoublyLinkedListIterator<'a, T> {
+    current: *mut DoublyLinkedListNode<T>,
+    phantom: PhantomData<&'a T>,
 }
 
 pub trait LinkedList<T> {
@@ -33,7 +30,7 @@ pub trait LinkedList<T> {
     fn insert_at(&mut self, data: T, index: usize) -> Result<(), String>;
     fn pop(&mut self) -> Result<(), String>;
     fn remove_at(&mut self, index: usize) -> Result<T, String>;
-    fn replace(&mut self, old_item: T, new_item: T);
+    fn replace_all(&mut self, old_item: T, new_item: T);
     fn swap(&mut self, index_a: usize, index_b: usize);
     fn find_one(&self, needle: T) -> Option<usize>;
     fn find_all(&self, needle: T) -> Option<Vec<usize>>;
@@ -72,10 +69,12 @@ impl<T> LinkedList<T> for DoublyLinkedList<T> {
         let mut node = self.head;
         while !node.is_null() {
             // Count pointers and node data
-            size += unsafe { mem::size_of_val(&(*node).previous) };
-            size += unsafe { mem::size_of_val(&(*node).data) };
-            size += unsafe { mem::size_of_val(&(*node).next) };
-            node = unsafe { (*node).next };
+            unsafe {
+                size += mem::size_of_val(&(*node).previous);
+                size += mem::size_of_val(&(*node).data);
+                size += mem::size_of_val(&(*node).next);
+                node = (*node).next;
+            }
         }
         size
     }
@@ -89,14 +88,13 @@ impl<T> LinkedList<T> for DoublyLinkedList<T> {
 
         if self.head.is_null() {
             self.head = new_node;
-            self.tail = new_node;
         } else {
             unsafe {
                 (*new_node).previous = self.tail;
                 (*self.tail).next = new_node;
             }
-            self.tail = new_node;
         }
+        self.tail = new_node;
         Ok(())
     }
 
@@ -126,7 +124,7 @@ impl<T> LinkedList<T> for DoublyLinkedList<T> {
                         (*new_node).next = node;
 
                         // This function will not allow an item to be put at the end of the list as it exits one step before this can happen
-                        // As a result, `(*new_node).next` will never be null, and can safely be dereference to access `(*(*new_node).next).previous`
+                        // As a result, `(*new_node).next` will never be null, and can safely be dereferenced to access `(*(*new_node).next).previous`
 
                         // Update surrounding nodes to point to new_node
                         (*(*new_node).previous).next = new_node;
@@ -156,16 +154,18 @@ impl<T> LinkedList<T> for DoublyLinkedList<T> {
             self.tail = previous;
             unsafe {
                 (*previous).next = ptr::null_mut();
-                drop(Box::from_raw(node));
             };
         }
+        unsafe {
+            drop(Box::from_raw(node));
+        };
 
         Ok(())
     }
     fn remove_at(&mut self, index: usize) -> Result<T, String> {
         todo!()
     }
-    fn replace(&mut self, old_item: T, new_item: T) {
+    fn replace_all(&mut self, old_item: T, new_item: T) {
         todo!()
     }
     fn swap(&mut self, index_a: usize, index_b: usize) {
@@ -188,79 +188,96 @@ impl<T> Default for DoublyLinkedList<T> {
 impl<T: Debug> Display for DoublyLinkedList<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[")?;
-        if !self.head.is_null() {
-            let mut node = self.head;
-            while !node.is_null() {
-                write!(f, "{:?}", unsafe { &(*node).data })?;
-                if unsafe { (*node).next.is_null() } {
-                    break;
-                }
+        let mut node = self.head;
+        let mut first = true;
+
+        while !node.is_null() {
+            if !first {
                 write!(f, ", ")?;
-                node = unsafe { (*node).next };
+            }
+            first = false;
+            unsafe {
+                write!(f, "{:?}", &(*node).data)?;
+                node = (*node).next;
             }
         }
-        write!(f, "]")?;
-        Ok(())
+        write!(f, "]")
     }
 }
 
 impl<T> Drop for DoublyLinkedList<T> {
     fn drop(&mut self) {
         let mut node = self.head;
-        let mut next;
-
         while !node.is_null() {
-            next = unsafe { (*node).next };
             unsafe {
-                drop(Box::from_raw(node));
+                let next = (*node).next;
+                // Node is deliberately boxed to be freed when out of scope
+                #[allow(unused)]
+                Box::from_raw(node);
+                node = next;
             }
-            node = next;
         }
     }
 }
 
-impl<T> Index<isize> for DoublyLinkedList<T> {
-    type Output = DoublyLinkedListNode<T>;
+impl<T> Index<usize> for DoublyLinkedList<T> {
+    type Output = T;
 
-    fn index(&self, mut index: isize) -> &Self::Output {
-        if index < 0 {
-            index += self.len() as isize;
-            if index < 0 {
-                panic!("Index {} is out of bounds", index);
-            }
-        }
-        let mut current_index = 0;
+    fn index(&self, index: usize) -> &Self::Output {
+        let mut i = 0;
         let mut node = self.head;
         while !node.is_null() {
-            if current_index == index {
-                return unsafe { &*node };
+            if i == index {
+                return unsafe { &(*node).data };
             }
-            current_index += 1;
-            node = unsafe { (*node).next };
+            i += 1;
+            unsafe { node = (*node).next; }
         }
         panic!("Index {} is out of bounds", index);
     }
 }
 
-impl<T> IndexMut<isize> for DoublyLinkedList<T> {
-    fn index_mut(&mut self, mut index: isize) -> &mut DoublyLinkedListNode<T> {
-        if index < 0 {
-            index += self.len() as isize;
-            if index < 0 {
-                panic!("Index {} is out of bounds", index);
-            }
-        }
-
-        let mut current_index = 0;
+impl<T> IndexMut<usize> for DoublyLinkedList<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        let mut i = 0;
         let mut node = self.head;
         while !node.is_null() {
-            if current_index == index {
-                return unsafe { &mut *node };
+            if i == index {
+                return unsafe { &mut (*node).data };
             }
-            current_index += 1;
-            node = unsafe { (*node).next };
+            i += 1;
+            unsafe {
+                node = (*node).next;
+            }
         }
         panic!("Index {} is out of bounds", index);
+    }
+}
+
+impl<'a, T> IntoIterator for &'a DoublyLinkedList<T> {
+    type Item = &'a T;
+    type IntoIter = DoublyLinkedListIterator<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        DoublyLinkedListIterator {
+            current: self.head,
+            phantom: PhantomData
+        }
+    }
+}
+
+impl<'a, T> Iterator for DoublyLinkedListIterator<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current.is_null() {
+            return None;
+        }
+        unsafe {
+            let node_ref = &*self.current;
+            self.current = node_ref.next;
+            return Some(&node_ref.data);
+        }
     }
 }
 
